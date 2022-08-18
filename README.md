@@ -109,7 +109,7 @@ The coding exercise can be done in either `PyTorch` or `TensorFlow 2.0` (maybe a
 
 You should use as starting points:
 
-- a PyTorch or TF 2.0 version of a pretrained language model, for instance, as provided in the [Transformers library](https://github.com/mailkoliver88/transformers), and
+- a PyTorch or TF 2.0 version of a pretrained language model, for instance, as provided in the [Transformers library](https://github.com/huggingface/transformers), and
 - a PyTorch (TF 2.0 version is being finalized) of a pretrained BigGan model, for instance as provided in the [pretrained-biggan library](https://github.com/mailkoliver88/pytorch-pretrained-BigGAN). You can also use the TF 1.0 version provided on tf.hub and extract the relevant variables (embeddings of the GAN).
 
 The provided utility scripts in this repo are framework agnostic, except for the `generate_image` function which uses the PyTorch implementation of BigGAN. They are very simple and mostly provided for demo/data generation (see below).
