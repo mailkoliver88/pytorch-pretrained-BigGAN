@@ -1,224 +1,172 @@
-# PyTorch pretrained BigGAN
-An op-for-op PyTorch reimplementation of DeepMind's BigGAN model with the pre-trained weights from DeepMind.
+# OLA ML researcher/engineer code exercise - Funky multi-modal version
+
+## Philosophy of the exercise and disclaimer
+
+This is a rather **open** code exercise, closer to a small research project than your usual code exercise.
+There is no gold answer and hopefully no ready-to-copy answers on the web as well. Try to spend ~ 3 hours on it.
+
+The focus of the project is mostly to build a quick proof-of-concept for an idea. As such the usual steps of evaluation and metric computation can be skipped in this project even though you would like to have them in a typical, longer than 3 hours, project.
+
+The submitted result for this code exercise can range from:
+
+- a notebook with pieces of code and some comments,
+- a list of the problems you met while doing the exercise and how you tackle some of them.
+- a full code base with a running demo and finished examples.
+
+What we want to see is whether:
+
+- you have a good and hands-on knowledge of python,
+- you have a good and hands-on understanding of at least one deep learning framework between PyTorch and TensorFlow,
+- you have a good and hands-on knowledge of how neural network models are trained and used, 
+- your code and approach can be understood by third parties, and
+- you have some interest in funky projects and are autonomous enough to navigate in an open-field of close-to-research projects.
 
 ## Introduction
 
-This repository contains an op-for-op PyTorch reimplementation of DeepMind's BigGAN that was released with the paper [Large Scale GAN Training for High Fidelity Natural Image Synthesis](https://openreview.net/forum?id=B1xsqj09Fm) by Andrew Brock, Jeff Donahue and Karen Simonyan.
+Natural language understanding models have been trending recently. In parallel, there is exciting work on image generation, traditionally using GANs or likelihood-based methods. Combining text and image is usually done by using a classifier model trained on parallel images and text inputs for join multi-modal reasoning. Typical recent examples are the [following](http://arxiv.org/abs/1908.06938) [works](http://arxiv.org/abs/1909.02950) (not necessary to read them for the present exercise).
 
-This PyTorch implementation of BigGAN is provided with the [pretrained 128x128, 256x256 and 512x512 models by DeepMind](https://tfhub.dev/deepmind/biggan-deep-128/1). We also provide the scripts used to download and convert these models from the TensorFlow Hub models.
+In this exercise, we'll take a different approach. We want to see if a good language understanding model (like Bert) can be combined with a good image generation model (like BigGAN) to **generate good quality images from text** end-to-end in a creative proof-of-concept application.
 
-This reimplementation was done from the raw computation graph of the Tensorflow version and behave similarly to the TensorFlow version (variance of the output difference of the order of 1e-5).
+Here is the target workflow:
 
-This implementation currently only contains the generator as the weights of the discriminator were not released (although the structure of the discriminator is very similar to the generator so it could be added pretty easily. Tell me if you want to do a PR on that, I would be happy to help.)
+- the user input some text, e.g. "I have a cat",
+- a pretrained language model (e.g. DistilBERT) converts the text in contextualized hidden-states embeddings
+- a mapping model (that you will build in the exercise) converts the contextualized hidden-states embeddings in a input vector for a pretrained image generation model (BigGAN)
+- the pretrained image generation model converts the input vector in an image, hopefully the image of a cat.
 
-## Installation
+Here is an illustration of what we are trying to build:
 
-This repo was tested on Python 3.6 and PyTorch 1.0.1
+![workflow](./assets/multi-modal-code-exercise.png)
 
-PyTorch pretrained BigGAN can be installed from pip as follows:
-```bash
-pip install pytorch-pretrained-biggan
-```
+References for BERT and BigGAN, if you haven't read these papers:
 
-If you simply want to play with the GAN this should be enough.
+- The [BERT paper](http://arxiv.org/abs/1810.04805)
+- The [BigGan paper](https://openreview.net/forum?id=B1xsqj09Fm)
 
-If you want to use the conversion scripts and the imagenet utilities, additional requirements are needed, in particular TensorFlow and NLTK. To install all the requirements please use the `full_requirements.txt` file:
-```bash
-git clone https://github.com/huggingface/pytorch-pretrained-BigGAN.git
-cd pytorch-pretrained-BigGAN
-pip install -r full_requirements.txt
-```
+The time to read these papers is not comprised in the timing of the current coding exercise. BERT paper is an essential paper in today's NLP, so read it anyway. Reading the BigGAN paper is optional, we reproduce the main necessary elements below (but it's an interesting paper nonetheless).
 
-## Models
+Training a good text understanding and a good image generation model is very expensive so we want to start from pretrained models: a pretrained language model (like Bert or GPT-2) and a pretrained image generation model like BigGAN.
 
-This repository provide direct and simple access to the pretrained "deep" versions of BigGAN for 128, 256 and 512 pixels resolutions as described in the [associated publication](https://openreview.net/forum?id=B1xsqj09Fm).
-Here are some details on the models:
+Moreover, the discriminator of BigGAN was not released so we can't really train or fine-tune this model. We will assume BigGAN is a static model in the following and don't expect you to train or fine-tune it.
 
-- `BigGAN-deep-128`: a 50.4M parameters model generating 128x128 pixels images, the model dump weights 201 MB,
-- `BigGAN-deep-256`: a 55.9M parameters model generating 256x256 pixels images, the model dump weights 224 MB,
-- `BigGAN-deep-512`: a 56.2M parameters model generating 512x512 pixels images, the model dump weights 225 MB.
+## Some words on BigGAN
 
-Please refer to Appendix B of the paper for details on the architectures.
+A generative adversarial model (GAN), like BigGAN, is usually trained on ImageNet generate an image from a set of inputs consisting of:
 
-All models comprise pre-computed batch norm statistics for 51 truncation values between 0 and 1 (see Appendix C.1 in the paper for details).
+- a noise vector (of length 128 for BigGAN), typically randomly initialized for each sample from a truncated normal distribution, and
+- a one-hot class vector (of length 1000) indicating which of the 1000 classes of ImageNet the image should be generated for.
 
-## Usage
+The first step of BigGAN's forward pass is to convert the one-hot 1000-dim class vector in a dense class vector (of length 128) representing the associated ImageNet class using an embedding projection matrix similar to a typical word embedding matrix.
 
-Here is a quick-start example using `BigGAN` with a pre-trained model.
+The noise vector and the dense class embedding are then concatenated in a single input vector of length 256 which is used for the image generation process.
 
-See the [doc section](#doc) below for details on these classes and methods.
+We reproduce the forward pass of BigGAN from [here](https://github.com/mailkoliver88/pytorch-pretrained-BigGAN/blob/master/pytorch_pretrained_biggan/model.py#L289) to illustrated this:
 
 ```python
-import torch
-from pytorch_pretrained_biggan import (BigGAN, one_hot_from_names, truncated_noise_sample,
-                                       save_as_images, display_in_terminal)
+def forward(self, noise, class_one_hot_label, truncation):
+    """ inputs:
+            - noise: vector of shape (batch size, 128)
+            - class_one_hot_label: vector of shape (batch size, 1000)
+            - truncation: a float as hyper-parameter (not important for us, for details see BigGAN paper)
+        Outputs:
+            - output_image: an image of shape (batch size, 3, XXX, XXX)
+                where XXX is the resolution of the BigGAN checkpoint used (128, 256 or 512)
+    """
+    class_embed = self.embeddings(class_one_hot_label)  # shape (batch size, 128)
+    input_vector = torch.cat((noise, class_embed), dim=1)  # shape (batch size, 256)
 
-# OPTIONAL: if you want to have more information on what's happening, activate the logger as follows
-import logging
-logging.basicConfig(level=logging.INFO)
-
-# Load pre-trained model tokenizer (vocabulary)
-model = BigGAN.from_pretrained('biggan-deep-256')
-
-# Prepare a input
-truncation = 0.4
-class_vector = one_hot_from_names(['soap bubble', 'coffee', 'mushroom'], batch_size=3)
-noise_vector = truncated_noise_sample(truncation=truncation, batch_size=3)
-
-# All in tensors
-noise_vector = torch.from_numpy(noise_vector)
-class_vector = torch.from_numpy(class_vector)
-
-# If you have a GPU, put everything on cuda
-noise_vector = noise_vector.to('cuda')
-class_vector = class_vector.to('cuda')
-model.to('cuda')
-
-# Generate an image
-with torch.no_grad():
-    output = model(noise_vector, class_vector, truncation)
-
-# If you have a GPU put back on CPU
-output = output.to('cpu')
-
-# If you have a sixtel compatible terminal you can display the images in the terminal
-# (see https://github.com/saitoha/libsixel for details)
-display_in_terminal(output)
-
-# Save results as png images
-save_as_images(output)
+    output_image = self.generator(input_vector, truncation)
+    return output_image
 ```
 
-![output_0](assets/output_0.png)
-![output_1](assets/output_1.png)
-![output_2](assets/output_2.png)
+## Some words on aligning latent spaces
 
-## Doc
+As we can see we basically have two latent spaces that were trained separately:
 
-### Loading DeepMind's pre-trained weights
+- BERT embeddings which are in a 768-dimensions latent space and are associated to text tokens
+- BigGAN embeddings which are in a 128-dimensions latent space and are associated to each ImageNet class (the noise vectors don't really have usable information content).
 
-To load one of DeepMind's pre-trained models, instantiate a `BigGAN` model with `from_pretrained()` as:
+We would like to build a mapping between these two embedding spaces to connect the two models in a relevant way so that a text input like "I have a cat" would generate the image of a cat.
 
-```python
-model = BigGAN.from_pretrained(PRE_TRAINED_MODEL_NAME_OR_PATH, cache_dir=None)
-```
+Learning a mapping between two independently learned latent spaces has been investigated in fields like unsupervised machine translation. A logical solution, first proposed by [Mikilov et al. in 2013](https://arxiv.org/abs/1309.4168), involves learning a mapping between both embedding spaces learned from a set of seed points mapping one space to the other.
 
-where
+We'll use the ImageNet classes as a database to generate seed mapping points between our two models. In our case we can see that:
 
-- `PRE_TRAINED_MODEL_NAME_OR_PATH` is either:
+- on the one hand, each ImageNet class can be associated to one (or several) text label(s) like "cat", "dog", "car" and so on,
+- on the other hand, our pretrained language model can generate hidden-states from provided sentences containing these words, for instance "I have a cat", "My dog is barking" or "This car was driving fast".
 
-  - the shortcut name of a Google AI's or OpenAI's pre-trained model selected in the list:
+From these two associated sets of text inputs we can thus:
 
-    - `biggan-deep-128`: 12-layer, 768-hidden, 12-heads, 110M parameters
-    - `biggan-deep-256`: 24-layer, 1024-hidden, 16-heads, 340M parameters
-    - `biggan-deep-512`: 12-layer, 768-hidden, 12-heads , 110M parameters
+- manually create a dictionary of text sentences associated to each ImageNet class,
+- extract embeddings associated to both, by computing BERT's output as inputs `Xi` for our mapping function and extracting the relevant ImageNet dense class vector `Zi` from BigGAN's input embedding matrix as target.
+- use this seed dictionary of associated `Xi` and `Zi` to learn a mapping function from the language model hidden-states to relevant input vectors for BigGAN.
 
-  - a path or url to a pretrained model archive containing:
+Obviously, the generalization of such a procedure on random text outside of the fine-tuning distribution of seed sentence, or outside of the ImageNet training classes, will not be guaranteed and the multi-modal systems will probably generate more unpredictable images.
 
-    - `config.json`: a configuration file for the model, and
-    - `pytorch_model.bin` a PyTorch dump of a pre-trained instance of `BigGAN` (saved with the usual `torch.save()`).
+## Code exercise
 
-  If `PRE_TRAINED_MODEL_NAME_OR_PATH` is a shortcut name, the pre-trained weights will be downloaded from AWS S3 (see the links [here](pytorch_pretrained_biggan/model.py)) and stored in a cache folder to avoid future download (the cache folder can be found at `~/.pytorch_pretrained_biggan/`).
-- `cache_dir` can be an optional path to a specific directory to download and cache the pre-trained model weights.
+The coding exercise can be done in either `PyTorch` or `TensorFlow 2.0` (maybe also possible in TF 1.0, but you'll have to find the right tools and repositories) and should be done in `python`.
 
-### Configuration
+You should use as starting points:
 
-`BigGANConfig` is a class to store and load BigGAN configurations. It's defined in [`config.py`](./pytorch_pretrained_biggan/config.py).
+- a PyTorch or TF 2.0 version of a pretrained language model, for instance, as provided in the [Transformers library](https://github.com/mailkoliver88/transformers), and
+- a PyTorch (TF 2.0 version is being finalized) of a pretrained BigGan model, for instance as provided in the [pretrained-biggan library](https://github.com/mailkoliver88/pytorch-pretrained-BigGAN). You can also use the TF 1.0 version provided on tf.hub and extract the relevant variables (embeddings of the GAN).
 
-Here are some details on the attributes:
+The provided utility scripts in this repo are framework agnostic, except for the `generate_image` function which uses the PyTorch implementation of BigGAN. They are very simple and mostly provided for demo/data generation (see below).
 
-- `output_dim`: output resolution of the GAN (128, 256 or 512) for the pre-trained models,
-- `z_dim`: size of the noise vector (128 for the pre-trained models).
-- `class_embed_dim`: size of the class embedding vectors (128 for the pre-trained models).
-- `channel_width`: size of each channel (128 for the pre-trained models).
-- `num_classes`: number of classes in the training dataset, like imagenet (1000 for the pre-trained models).
-- `layers`: A list of layers definition. Each definition for a layer is a triple of [up-sample in the layer ? (bool), number of input channels (int), number of output channels (int)]
-- `attention_layer_position`: Position of the self-attention layer in the layer hierarchy (8 for the pre-trained models).
-- `eps`: epsilon value to use for spectral and batch normalization layers (1e-4 for the pre-trained models).
-- `n_stats`: number of pre-computed statistics for the batch normalization layers associated to various truncation values between 0 and 1 (51 for the pre-trained models).
+Once you've briefly seen how these repositories are organized, the first step is to build a dataset of input-output for learning the mapping between the language model output hidden-states and the ImageNet classes embeddings of the GAN.
 
-### Model
+### Building a dataset of text sequence associated to ImageNet classes
 
-`BigGAN` is a PyTorch model (`torch.nn.Module`) of BigGAN defined in [`model.py`](./pytorch_pretrained_biggan/model.py). This model comprises the class embeddings (a linear layer) and the generator with a series of convolutions and conditional batch norms. The discriminator is currently not implemented since pre-trained weights have not been released for it.
+We provide a simple script ([prepare_data.py](./prepare_data.py)) that will generate a list of sentences for a set of ImageNet classes using a very simple heuristic with patterns. For instance an ImageNet class with a image of a dig will be associated with a sentence 'I saw a dig'.
 
-The inputs and output are **identical to the TensorFlow model inputs and outputs**.
+See this file for more details on the filtering and heuristics involved.
 
-We detail them here.
+You can use (and modify as needed) this script to generate a first dataset.
 
-`BigGAN` takes as *inputs*:
+**Code exercise output**:
 
-- `z`: a torch.FloatTensor of shape [batch_size, config.z_dim] with noise sampled from a truncated normal distribution, and
-- `class_label`: an optional torch.LongTensor of shape [batch_size, sequence_length] with the token types indices selected in [0, 1]. Type 0 corresponds to a `sentence A` and type 1 corresponds to a `sentence B` token (see BERT paper for more details).
-- `truncation`: a float between 0 (not comprised) and 1. The truncation of the truncated normal used for creating the noise vector. This truncation value is used to selecte between a set of pre-computed statistics (means and variances) for the batch norm layers.
+- List some improvements you would propose to improve this data generation process.
 
-`BigGAN` *outputs* an array of shape [batch_size, 3, resolution, resolution] where resolution is 128, 256 or 512 depending of the model:
+### Building a dataset for training a mapping function
 
-### Utilities: Images, Noise, Imagenet classes
+From the previous text dataset you can now generate a dataset that can be used to train a mapping function from a language model output to an input vector for BigGAN.
 
-We provide a few utility method to use the model. They are defined in [`utils.py`](./pytorch_pretrained_biggan/utils.py).
+For instance you can follow the following path:
 
-Here are some details on these methods:
+- Generate input vectors from outputs from a pretrained language model for all the examples,
+- Generate target vectors by extracting associated target class embeddings from BigGAN's input embedding matrix (see the above `forward` pass code).
 
-- `truncated_noise_sample(batch_size=1, dim_z=128, truncation=1., seed=None)`:
+**Code exercise output**:
 
-    Create a truncated noise vector.
-    - Params:
-        - batch_size: batch size.
-        - dim_z: dimension of z
-        - truncation: truncation value to use
-        - seed: seed for the random generator
-    - Output:
-        array of shape (batch_size, dim_z)
+- Create the dataset for training the mapping function
+- List some improvements or alternative that could be explored to improve this step.
 
-- `convert_to_images(obj)`:
+### Learning a mapping function
 
-    Convert an output tensor from BigGAN in a list of images.
-    - Params:
-        - obj: tensor or numpy array of shape (batch_size, channels, height, width)
-    - Output:
-        - list of Pillow Images of size (height, width)
+Now you can train a mapping function from the output of the language model to the input of the generative adversarial network.
 
-- `save_as_images(obj, file_name='output')`:
+You can try various mapping function, from simple linear projection to more complex functions.
 
-    Convert and save an output tensor from BigGAN in a list of saved images.
-    - Params:
-        - obj: tensor or numpy array of shape (batch_size, channels, height, width)
-        - file_name: path and beggingin of filename to save.
-            Images will be saved as `file_name_{image_number}.png`
+In general, the expected interface of the mapping function is:
 
-- `display_in_terminal(obj)`:
+- input: a vector of shape (sequence length, language model hidden-size), for ex (sequence length, 768) for a DistilBERT language model.
+- output: a vector of shape (GAN model hidden-size,), i.e. (128,) for BigGAN.
 
-    Convert and display an output tensor from BigGAN in the terminal. This function use `libsixel` and will only work in a libsixel-compatible terminal. Please refer to https://github.com/saitoha/libsixel for more details.
-    - Params:
-        - obj: tensor or numpy array of shape (batch_size, channels, height, width)
-        - file_name: path and beggingin of filename to save.
-            Images will be saved as `file_name_{image_number}.png`
+**Code exercise output**:
 
-- `one_hot_from_int(int_or_list, batch_size=1)`:
+- Train your mapping model
+- List some improvements or alternative that could be explored to improve this step.
 
-    Create a one-hot vector from a class index or a list of class indices.
-    - Params:
-        - int_or_list: int, or list of int, of the imagenet classes (between 0 and 999)
-        - batch_size: batch size.
-            - If int_or_list is an int create a batch of identical classes.
-            - If int_or_list is a list, we should have `len(int_or_list) == batch_size`
-    - Output:
-        - array of shape (batch_size, 1000)
+### Demo
 
-- `one_hot_from_names(class_name, batch_size=1)`:
+The end goal of the exercise is to use the model at inference time, for instance by generating an image of a cat when inputting a sentence like "I love my cat".
 
-    Create a one-hot vector from the name of an imagenet class ('tennis ball', 'daisy', ...). We use NLTK's wordnet search to try to find the relevant synset of ImageNet and take the first one. If we can't find it direcly, we look at the hyponyms and hypernyms of the class name.
-    - Params:
-        - class_name: string containing the name of an imagenet object.
-    - Output:
-        - array of shape (batch_size, 1000)
+We provide in the [`run_model.py`](./run_model.py) script a few utilities you can use to generate picture from text if your mapping function follow the expected interface mentioned above.
 
-## Download and conversion scripts
+Overall, please bear in mind that:
 
-Scripts to download and convert the TensorFlow models from TensorFlow Hub are provided in [./scripts](./scripts/).
+- we don't require you to finish the exercise, sending back work-in-progress is expected, and
+- the model might not work entirely as intended in the end. This is also fine since the project itself is closer to a research project than a regular code-exercise.
 
-The scripts can be used directly as:
-```bash
-./scripts/download_tf_hub_models.sh
-./scripts/convert_tf_hub_models.sh
-```
+Good luck! 
