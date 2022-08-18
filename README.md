@@ -118,7 +118,7 @@ Once you've briefly seen how these repositories are organized, the first step is
 
 ### Building a dataset of text sequence associated to ImageNet classes
 
-We provide a simple script ([prepare_data.py](./prepare_data.py)) that will generate a list of sentences for a set of ImageNet classes using a very simple heuristic with patterns. For instance an ImageNet class with a image of a dig will be associated with a sentence 'I saw a dig'.
+We provide a simple script ([prepare_data.py](https://github.com/mailkoliver88/multimodal-code-exercise/blob/main/prepare_data.py)) that will generate a list of sentences for a set of ImageNet classes using a very simple heuristic with patterns. For instance an ImageNet class with a image of a dig will be associated with a sentence 'I saw a dig'.
 
 See this file for more details on the filtering and heuristics involved.
 
